@@ -25099,14 +25099,27 @@ p.SafeCallback(x,r,u)
 end
 end
 
+-- [alphabay patch] เดิม: เพิ่ม 1 ตัว → UpdateFont ตั้ง FontFace ใหม่ให้ "ทุก" ข้อความที่เคยสร้าง (O(n) ต่อตัว = O(n²))
+-- วัดใน UI จริง: เปิด dropdown 178 รายการ = font object 524→881 ตัว ทุกตัวที่เพิ่มเขียน FontFace ทับทั้งหมด
+-- → เฟรมเฉลี่ย 18.9 ms ตลอด 4 วิ (ปกติ 9) — ยิ่งสร้าง element มาก ตัวต่อไปยิ่งช้า (รวมตอน LazyUI สร้างแท็บ)
+-- ตอนนี้: ตั้งฟอนต์เฉพาะตัวที่เพิ่ม (และเฉพาะเมื่อไม่ตรง) · เก็บเป็น set และลบเมื่อ Instance ถูกทำลาย (เดิมค้างตลอดไป)
 function p.AddFontObject(r)
-table.insert(p.FontObjects,r)
-p.UpdateFont(p.Font)
+if p.FontObjects[r]then
+return
+end
+p.FontObjects[r]=true
+local f=r.FontFace
+if f.Family~=p.Font then
+r.FontFace=Font.new(p.Font,f.Weight,f.Style)
+end
+r.Destroying:Connect(function()
+p.FontObjects[r]=nil
+end)
 end
 
 function p.UpdateFont(r)
 p.Font=r
-for u,v in next,p.FontObjects do
+for v in next,p.FontObjects do
 v.FontFace=Font.new(r,v.FontFace.Weight,v.FontFace.Style)
 end
 end
@@ -32738,6 +32751,7 @@ end
 -- dropdown หลายร้อยรายการ: เดิมสร้างครบในเฟรมเดียว = ค้างเป็นวินาที → ตอนนี้ ≤ BuildBudget/เฟรม
 -- รายการแรกๆ โผล่ทันที ที่เหลือตามมา — Refresh ซ้ำระหว่างสร้าง = รอบเก่าหยุดทันที (buildGen)
 local BuildBudget=0.006
+local RecalcInterval=0.2
 local buildGen=0
 local searchText=""
 -- ทยอยได้เฉพาะหลังสร้าง dropdown เสร็จ — ระหว่างสร้าง element ห้าม yield
@@ -32758,6 +32772,7 @@ local gen=buildGen
 local silent=suppressCallback
 local canYield=constructed and coroutine.isyieldable()
 local sliceStart=os.clock()
+local lastRecalc=0
 
 for aw,ax in next,ap.UIElements.Menu.Frame.ScrollingFrame:GetChildren()do
 if not ax:IsA"UIListLayout"then
@@ -33045,8 +33060,13 @@ else a.load'S'
 :New{Parent=ap.UIElements.Menu.Frame.ScrollingFrame}
 end
 if canYield and os.clock()-sliceStart>BuildBudget then
+-- อ่าน AbsoluteContentSize = บังคับ layout ทั้ง list ทันที (ยิ่ง list ยาวยิ่งแพง)
+-- → อัปเดตขนาดเมนูแค่ชุดแรก แล้วไม่เกินทุก RecalcInterval (วัดในเกม: ทุกชุด = item/เฟรม ลดจาก 18 เหลือ 5)
+if lastRecalc==0 or os.clock()-lastRecalc>RecalcInterval then
 RecalculateCanvasSize()
 RecalculateListSize()
+lastRecalc=os.clock()
+end
 task.wait()
 if gen~=buildGen or ao.Window.Destroyed then
 return
