@@ -38706,6 +38706,30 @@ v.Size=G
 end
 end
 
+-- [alphabay patch] ล็อคขนาดเนื้อหาระหว่าง animation เปิด/ปิดหน้าต่าง
+-- เนื้อหาใช้ Size {1,0},{1,0} ตามหน้าต่าง → ทุกเฟรมที่หน้าต่างเปลี่ยนขนาด Roblox คำนวณ layout
+-- ของทุก Instance ข้างใน (~6000 ชิ้น รวมแท็บที่ไม่ได้เปิด) ใหม่ — ถึงจะ Visible=false ก็ยังคำนวณ
+-- วัดในเกม: tween หน้าต่าง (ซ่อนเนื้อหา) avg 11.5 / p90 18 ms → ล็อคขนาด avg 9.8 / p90 14 ms (= baseline)
+-- คืนเป็น {1,0},{1,0} ตอน tween จบ — ขนาดจริงเท่าเดิม จึงไม่ต้องคำนวณ layout ใหม่
+local contentNaturalSize=nil
+
+local function FreezeContentSize(content)
+if not content or aw.Size.Y.Scale~=0 then
+return
+end
+if not contentNaturalSize then
+contentNaturalSize=content.Size
+end
+content.Size=UDim2.new(1,0,0,aw.Size.Y.Offset)
+end
+
+local function ThawContentSize(content)
+if content and contentNaturalSize then
+content.Size=contentNaturalSize
+contentNaturalSize=nil
+end
+end
+
 function aw.Open(C)
 if aw.Destroyed then
 return
@@ -38727,6 +38751,7 @@ local OpenTweenTime=0.45
 local content=aw.UIElements.Main:FindFirstChild"Main"
 if content then
 content.Visible=false
+FreezeContentSize(content)
 end
 
 aw.UIElements.Main.Size=UDim2.new(aw.Size.X.Scale,aw.Size.X.Offset,0,100)
@@ -38811,6 +38836,7 @@ aw.UIElements.Main.Visible=true
 content=aw.UIElements.Main:WaitForChild"Main"
 openTween.Completed:Once(function(state)
 if state==Enum.PlaybackState.Completed and not aw.Closed and not aw.Destroyed then
+ThawContentSize(content)
 content.Visible=true
 end
 end)
@@ -38836,6 +38862,8 @@ av.WindUI:ToggleAcrylic(false)
 
 if aw.UIElements.Main and aw.UIElements.Main:WaitForChild"Main"then
 aw.UIElements.Main.Main.Visible=false
+-- [alphabay patch] หดหน้าต่าง 0.9 วิ — ล็อคขนาดเนื้อหาไว้ ไม่ให้คำนวณ layout ทุกเฟรม (คืนตอนเปิดเสร็จ)
+FreezeContentSize(aw.UIElements.Main.Main)
 end
 
 aw.CanDropdown=false
