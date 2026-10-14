@@ -38750,6 +38750,103 @@ contentNaturalSize=nil
 end
 end
 
+-- [alphabay patch] fade-in element ของแท็บ ไล่จากบนลงล่าง (ตอนเปิดหน้าต่าง / สลับแท็บ)
+-- เปลี่ยนแค่ความโปร่งใส = ไม่กระทบ layout (ไม่ต้องคำนวณขนาด/ตำแหน่งใหม่) จึงถูก
+-- เฉพาะ element ที่อยู่ในจอ (ตัวนอกจอโชว์ทันที) · เก็บค่าเดิมไว้คืนเป๊ะ — ปิดหน้าต่าง/สลับแท็บกลางทาง
+-- = คืนค่าทันที (ถ้าไม่คืน ครั้งหน้าจะจำค่า 1 เป็นค่าเดิม แล้ว element หายถาวร)
+local RevealStep=0.035
+local RevealFade=0.25
+local RevealMax=20
+local revealGen=0
+local revealSaved={}
+local revealTweens={}
+
+local function FinishReveal()
+revealGen+=1
+for _,tw in ipairs(revealTweens)do
+tw:Cancel()
+end
+table.clear(revealTweens)
+for _,saved in ipairs(revealSaved)do
+saved[1][saved[2]]=saved[3]
+end
+table.clear(revealSaved)
+end
+
+local function FadeTargets(root)
+local list={}
+local function add(inst)
+if inst:IsA"GuiObject"then
+if inst.BackgroundTransparency<1 then
+list[#list+1]={inst,"BackgroundTransparency",inst.BackgroundTransparency}
+end
+if(inst:IsA"ImageLabel"or inst:IsA"ImageButton")and inst.ImageTransparency<1 then
+list[#list+1]={inst,"ImageTransparency",inst.ImageTransparency}
+end
+if(inst:IsA"TextLabel"or inst:IsA"TextButton"or inst:IsA"TextBox")and inst.TextTransparency<1 then
+list[#list+1]={inst,"TextTransparency",inst.TextTransparency}
+end
+elseif inst:IsA"UIStroke"and inst.Transparency<1 then
+list[#list+1]={inst,"Transparency",inst.Transparency}
+end
+end
+add(root)
+for _,d in ipairs(root:GetDescendants())do
+add(d)
+end
+return list
+end
+
+function aw.RevealTab(C,H)
+FinishReveal()
+local tm=aw.TabModule
+local tab=tm and tm.Tabs[H or tm.SelectedTab]
+local cf=tab and tab.UIElements and tab.UIElements.ContainerFrame
+if not cf then
+return
+end
+local gen=revealGen
+local viewTop=cf.AbsolutePosition.Y
+local viewH=cf.AbsoluteSize.Y
+local items={}
+for _,c in ipairs(cf:GetChildren())do
+if c:IsA"GuiObject"and c.Visible then
+local y=c.AbsolutePosition.Y-viewTop
+if y<viewH and y+c.AbsoluteSize.Y>0 then
+items[#items+1]=c
+end
+end
+end
+table.sort(items,function(a,b)
+return a.AbsolutePosition.Y<b.AbsolutePosition.Y
+end)
+local count=math.min(#items,RevealMax)
+for i=1,count do
+local targets=FadeTargets(items[i])
+for _,t in ipairs(targets)do
+revealSaved[#revealSaved+1]=t
+t[1][t[2]]=1
+end
+task.delay((i-1)*RevealStep,function()
+if gen~=revealGen then
+return
+end
+for _,t in ipairs(targets)do
+local tw=ap(t[1],RevealFade,{[t[2]]=t[3]},Enum.EasingStyle.Quad,Enum.EasingDirection.Out)
+revealTweens[#revealTweens+1]=tw
+tw:Play()
+end
+end)
+end
+task.delay(count*RevealStep+RevealFade+0.05,function()
+if gen~=revealGen then
+return
+end
+table.clear(revealTweens)
+table.clear(revealSaved)
+end)
+end
+
 function aw.Open(C)
 if aw.Destroyed then
 return
@@ -38770,8 +38867,12 @@ aw.Closed=false
 local OpenTweenTime=0.45
 local content=aw.UIElements.Main:FindFirstChild"Main"
 if content then
-content.Visible=false
+-- [alphabay patch] โชว์ทันที ไม่ต้องรอ animation จบ — ขนาดล็อคไว้ (ไม่คำนวณ layout ทุกเฟรม)
+-- + clip ตามกรอบหน้าต่างที่กำลังขยาย (วัดในเกม: โชว์อยู่ + ล็อคขนาด ≈ เท่าไม่ทำอะไร)
 FreezeContentSize(content)
+content.Visible=true
+aw.UIElements.Main.ClipsDescendants=true
+aw:RevealTab()
 end
 
 aw.UIElements.Main.Size=UDim2.new(aw.Size.X.Scale,aw.Size.X.Offset,0,100)
@@ -38858,6 +38959,7 @@ openTween.Completed:Once(function(state)
 if state==Enum.PlaybackState.Completed and not aw.Closed and not aw.Destroyed then
 ThawContentSize(content)
 content.Visible=true
+aw.UIElements.Main.ClipsDescendants=false
 end
 end)
 
@@ -38888,6 +38990,7 @@ end
 
 aw.CanDropdown=false
 aw.Closed=true
+FinishReveal()
 
 ap(aw.UIElements.Main,0.9,{
 
@@ -39134,6 +39237,10 @@ local F=a.load'ah'
 local G=C.Init(aw,av.WindUI,av.WindUI.TooltipGui)
 G:OnChange(function(H)
 aw.CurrentTab=H
+-- [alphabay patch] fade-in element ของแท็บที่เพิ่งเลือก
+if not aw.Closed and aw.RevealTab then
+aw:RevealTab(H)
+end
 end)
 
 aw.TabModule=G
