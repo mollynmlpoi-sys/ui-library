@@ -32705,10 +32705,30 @@ end
 end
 end
 
+-- [alphabay patch] สร้าง item แบบทยอยข้ามเฟรม (ตอนเรียกจาก thread ที่ yield ได้ เช่นกดเปิดเมนู)
+-- dropdown หลายร้อยรายการ: เดิมสร้างครบในเฟรมเดียว = ค้างเป็นวินาที → ตอนนี้ ≤ BuildBudget/เฟรม
+-- รายการแรกๆ โผล่ทันที ที่เหลือตามมา — Refresh ซ้ำระหว่างสร้าง = รอบเก่าหยุดทันที (buildGen)
+local BuildBudget=0.006
+local buildGen=0
+local searchText=""
+-- ทยอยได้เฉพาะหลังสร้าง dropdown เสร็จ — ระหว่างสร้าง element ห้าม yield
+-- (Section ของ WindUI ตัดสินใจโชว์เนื้อหาใน task.defer ตอนสร้าง: yield ก่อนลูกครบ = section ว่างถาวร)
+local constructed=false
+
+local function MatchesSearch(name)
+return searchText==""or string.find(string.lower(name),searchText,1,true)~=nil
+end
+
 function as.Refresh(au,av)
 if ao.Window.Destroyed then
 return
 end
+buildGen+=1
+local gen=buildGen
+-- เงียบ callback ตลอดรอบนี้ (EnsureItems คืน suppressCallback ก่อนรอบนี้สร้างเสร็จ)
+local silent=suppressCallback
+local canYield=constructed and coroutine.isyieldable()
+local sliceStart=os.clock()
 
 for aw,ax in next,ap.UIElements.Menu.Frame.ScrollingFrame:GetChildren()do
 if not ax:IsA"UIListLayout"then
@@ -32721,15 +32741,12 @@ ap.Tabs={}
 if ap.SearchBarEnabled then
 if not at then
 at=aj("Search...","search",ap.UIElements.Menu,nil,function(aw)
+searchText=string.lower(aw)
 for ax,ay in next,ap.Tabs do
-if string.find(string.lower(ay.Name),string.lower(aw),1,true)then
-ay.UIElements.TabItem.Visible=true
-else
-ay.UIElements.TabItem.Visible=false
+ay.UIElements.TabItem.Visible=MatchesSearch(ay.Name)
 end
 RecalculateListSize()
 RecalculateCanvasSize()
-end
 end,true)
 at.Size=UDim2.new(1,0,0,aq.SearchBarHeight)
 at.Position=UDim2.new(0,0,0,0)
@@ -32910,6 +32927,9 @@ end
 end
 
 ap.Tabs[aw]=ay
+if searchText~=""then
+ay.UIElements.TabItem.Visible=MatchesSearch(ay.Name)
+end
 
 if ar=="Dropdown"then
 ak.AddSignal(ay.UIElements.TabItem.MouseButton1Click,function()
@@ -32995,6 +33015,15 @@ end
 else a.load'S'
 :New{Parent=ap.UIElements.Menu.Frame.ScrollingFrame}
 end
+if canYield and os.clock()-sliceStart>BuildBudget then
+RecalculateCanvasSize()
+RecalculateListSize()
+task.wait()
+if gen~=buildGen or ao.Window.Destroyed then
+return
+end
+sliceStart=os.clock()
+end
 end
 
 
@@ -33016,7 +33045,11 @@ ap.MenuWidth+6+6+5+5+18+6+6,
 ap.UIElements.MenuCanvas.Size.Y.Scale,
 ap.UIElements.MenuCanvas.Size.Y.Offset
 )
+if silent then
+as:Display()
+else
 Callback()
+end
 
 ap.Values=av
 end
@@ -33052,9 +33085,9 @@ if itemsBuilt then
 return
 end
 itemsBuilt=true
+task.spawn(function()
 suppressCallback=true
 local ok,err=pcall(BuildItems,as,ap.Values)
-suppressCallback=false
 if not ok then
 warn("[WindUI] dropdown build failed: "..tostring(err))
 end
@@ -33064,9 +33097,13 @@ pendingLockValues=nil
 end
 RecalculateListSize()
 RecalculateCanvasSize()
+end)
+-- Refresh จับค่า silent ไว้ตอนเริ่มแล้ว — คืนค่าได้ทันทีหลังชุดแรก
+suppressCallback=false
 end
 
 as:Refresh(ap.Values)
+constructed=true
 
 -- [alphabay patch] Select ไม่ rebuild รายการ — แค่อัปเดตสถานะ item ที่มีอยู่แล้ว
 -- (เดิม Refresh = ทำลาย + สร้าง item ใหม่ทุกตัว: dropdown หลายร้อยรายการค้างเป็นวินาที)
