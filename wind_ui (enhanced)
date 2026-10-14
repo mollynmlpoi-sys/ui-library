@@ -24992,17 +24992,38 @@ p.UIScale=r.UIScale
 i:Init(p)
 end
 
+-- [alphabay patch] เดิมเก็บทุก connection ไว้ตลอดไป — element ถูกทำลายแล้ว connection ตาย
+-- (Connected=false) แต่ยังค้างในลิสต์ → โตไม่หยุดตามการ Refresh/สร้าง UI
+-- ตอนนี้: ลิสต์ยาวถึงเกณฑ์ → กวาดตัวที่ตายทิ้ง แล้วเลื่อนเกณฑ์เป็น 2 เท่าของที่เหลือ (amortized O(1))
+local signalPruneAt=256
+
 function p.AddSignal(r,u)
 local v=r:Connect(u)
-table.insert(p.Signals,v)
+local list=p.Signals
+list[#list+1]=v
+if #list>=signalPruneAt then
+local kept=0
+for i=1,#list do
+local c=list[i]
+if typeof(c)~="RBXScriptConnection"or c.Connected then
+kept+=1
+list[kept]=c
+end
+end
+for i=#list,kept+1,-1 do
+list[i]=nil
+end
+signalPruneAt=math.max(256,kept*2)
+end
 return v
 end
 
+-- [alphabay patch] เดิม table.remove ระหว่างวน next = ข้ามทุกตัวที่ถัดจากตัวที่ลบ (disconnect ไม่ครบ)
 function p.DisconnectAll()
-for r,u in next,p.Signals do
-local v=table.remove(p.Signals,r)
+for _,v in ipairs(p.Signals)do
 v:Disconnect()
 end
+table.clear(p.Signals)
 end
 
 function p.SafeCallback(r,...)
@@ -25172,6 +25193,14 @@ p.Objects[r].Properties[x]=z
 end
 else
 p.Objects[r]={Object=r,Properties=u}
+-- [alphabay patch] ลบออกจาก registry เมื่อ Instance ถูกทำลาย (เดิมค้างตลอดไป:
+-- dropdown ที่ Refresh บ่อยทำให้ table โตไม่หยุด และเปลี่ยนธีมต้องวนของที่ตายแล้วด้วย)
+-- ไม่ผ่าน AddSignal — connection นี้ตายพร้อม Instance เอง
+if typeof(r)=="Instance"then
+r.Destroying:Connect(function()
+p.Objects[r]=nil
+end)
+end
 end
 
 if not v then
@@ -38691,12 +38720,22 @@ end
 task.wait(0.06)
 aw.Closed=false
 
+-- [alphabay patch] ซ่อนเนื้อหาระหว่าง tween ขนาดหน้าต่าง — เดิมเนื้อหามองเห็นตลอด 0.8 วิ
+-- = ทุกเฟรมเกมจัด layout ทั้งแท็บใหม่ (element ยิ่งเยอะยิ่งหนัก) → ตอนนี้ layout ครั้งเดียวตอนจบ
+-- (ขนาดเปลี่ยนแค่แนวตั้ง ข้อความ/ปุ่มไม่ต้องคำนวณใหม่ระหว่าง tween)
+local OpenTweenTime=0.45
+local content=aw.UIElements.Main:FindFirstChild"Main"
+if content then
+content.Visible=false
+end
+
 aw.UIElements.Main.Size=UDim2.new(aw.Size.X.Scale,aw.Size.X.Offset,0,100)
 
-ap(aw.UIElements.Main,0.8,{
+local openTween=ap(aw.UIElements.Main,OpenTweenTime,{
 
 Size=aw.Size,
-},Enum.EasingStyle.Quint,Enum.EasingDirection.Out):Play()
+},Enum.EasingStyle.Quint,Enum.EasingDirection.Out)
+openTween:Play()
 
 if aw.UIElements.BackgroundGradient then
 ap(aw.UIElements.BackgroundGradient,0.2,{
@@ -38768,7 +38807,13 @@ aw.UIElements.Main.Visible=true
 
 
 
-aw.UIElements.Main:WaitForChild"Main".Visible=true
+-- [alphabay patch] โชว์เนื้อหาเมื่อ tween จบจริง (Cancelled = ถูกปิด/เปิดซ้ำทับ → ไม่โชว์)
+content=aw.UIElements.Main:WaitForChild"Main"
+openTween.Completed:Once(function(state)
+if state==Enum.PlaybackState.Completed and not aw.Closed and not aw.Destroyed then
+content.Visible=true
+end
+end)
 
 av.WindUI:ToggleAcrylic(true)
 
