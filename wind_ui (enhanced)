@@ -38750,9 +38750,9 @@ contentNaturalSize=nil
 end
 end
 
--- [alphabay patch] fade-in element ของแท็บ ไล่จากบนลงล่าง (ตอนเปิดหน้าต่าง / สลับแท็บ)
+-- [alphabay patch] fade-in element ของแท็บ ไล่จากบนลงล่าง (เฉพาะตอนเปิดหน้าต่าง — สลับแท็บไม่ fade)
 -- เปลี่ยนแค่ความโปร่งใส = ไม่กระทบ layout (ไม่ต้องคำนวณขนาด/ตำแหน่งใหม่) จึงถูก
--- เฉพาะ element ที่อยู่ในจอ (ตัวนอกจอโชว์ทันที) · เก็บค่าเดิมไว้คืนเป๊ะ — ปิดหน้าต่าง/สลับแท็บกลางทาง
+-- เฉพาะ element ที่อยู่ในจอ (ตัวนอกจอโชว์ทันที) · เก็บค่าเดิมไว้คืนเป๊ะ — ปิดหน้าต่างกลางทาง
 -- = คืนค่าทันที (ถ้าไม่คืน ครั้งหน้าจะจำค่า 1 เป็นค่าเดิม แล้ว element หายถาวร)
 local RevealStep=0.035
 local RevealFade=0.25
@@ -39237,10 +39237,6 @@ local F=a.load'ah'
 local G=C.Init(aw,av.WindUI,av.WindUI.TooltipGui)
 G:OnChange(function(H)
 aw.CurrentTab=H
--- [alphabay patch] fade-in element ของแท็บที่เพิ่งเลือก
-if not aw.Closed and aw.RevealTab then
-aw:RevealTab(H)
-end
 end)
 
 aw.TabModule=G
